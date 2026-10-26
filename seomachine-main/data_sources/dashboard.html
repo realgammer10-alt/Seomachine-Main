@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>SEO Machine | Service Monitor</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f4f7fb;
+        color: #172033;
+        font-synthesis: none;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; }
+      main { width: min(100% - 32px, 1040px); margin: 48px auto; }
+      header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+      h1 { margin: 0; font-size: clamp(1.7rem, 4vw, 2.25rem); letter-spacing: -0.04em; }
+      .subtitle, .muted { color: #647087; }
+      .subtitle { margin: 8px 0 0; }
+      .overall { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid #dce3ee; border-radius: 999px; background: #fff; font-size: .9rem; font-weight: 650; white-space: nowrap; }
+      .dot { width: 10px; height: 10px; border-radius: 50%; background: #8b95a7; }
+      .dot.healthy { background: #16a36a; }
+      .dot.degraded { background: #d58a00; }
+      .dot.unhealthy { background: #d64141; }
+      .summary { margin: 0 0 14px; font-size: .9rem; }
+      #services { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px; }
+      .card { min-width: 0; padding: 20px; border: 1px solid #dce3ee; border-radius: 14px; background: #fff; box-shadow: 0 3px 12px rgb(30 45 70 / 4%); }
+      .card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      h2 { margin: 0; overflow-wrap: anywhere; font-size: 1.05rem; }
+      .badge { padding: 5px 9px; border-radius: 999px; background: #edf0f5; color: #566176; font-size: .75rem; font-weight: 700; text-transform: uppercase; }
+      .badge.healthy { background: #e3f7ee; color: #087446; }
+      .badge.degraded { background: #fff2d6; color: #855300; }
+      .badge.unhealthy { background: #fde8e8; color: #a52222; }
+      .details { display: flex; justify-content: space-between; gap: 12px; margin: 18px 0 12px; font-size: .86rem; }
+      .error { min-height: 1.25em; margin: 0 0 14px; color: #a52222; font-size: .85rem; overflow-wrap: anywhere; }
+      .history { display: flex; gap: 3px; height: 8px; }
+      .tick { flex: 1; min-width: 3px; border-radius: 3px; background: #d6dce6; }
+      .tick.healthy { background: #16a36a; }
+      .tick.unhealthy { background: #d64141; }
+      .empty, .load-error { padding: 32px 24px; border: 1px dashed #c6cfdd; border-radius: 14px; background: #fff; text-align: center; }
+      .load-error { color: #a52222; }
+      footer { margin-top: 20px; text-align: right; font-size: .8rem; }
+      @media (max-width: 560px) {
+        main { margin-top: 28px; }
+        header { flex-direction: column; }
+      }
+      @media (prefers-color-scheme: dark) {
+        :root { background: #101722; color: #e8edf5; }
+        .subtitle, .muted { color: #a4afc0; }
+        .overall, .card, .empty, .load-error { border-color: #2b3748; background: #182230; }
+        .badge { background: #293445; color: #c4cede; }
+        .badge.healthy { background: #123d2d; color: #8be1b8; }
+        .badge.degraded { background: #493817; color: #ffd277; }
+        .badge.unhealthy { background: #4a2528; color: #ffaaaa; }
+        .error, .load-error { color: #ffaaaa; }
+        .tick { background: #344154; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Service monitor</h1>
+          <p class="subtitle">Live HTTP health for your SEO Machine integrations.</p>
+        </div>
+        <div class="overall" role="status" aria-live="polite">
+          <span id="overall-dot" class="dot"></span>
+          <span id="overall-status">Loading status</span>
+        </div>
+      </header>
+      <p id="summary" class="summary muted" aria-live="polite"></p>
+      <section id="services" aria-label="Monitored services"></section>
+      <footer class="muted">Auto-refreshes every 5 seconds <span id="updated"></span></footer>
+    </main>
+    <script>
+      const services = document.getElementById("services");
+      const statusLabel = document.getElementById("overall-status");
+      const statusDot = document.getElementById("overall-dot");
+      const summary = document.getElementById("summary");
+      const updated = document.getElementById("updated");
+
+      function formatTime(value) {
+        if (!value) return "Not checked yet";
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? "Time unavailable" : date.toLocaleString();
+      }
+
+      function serviceCard(service) {
+        const card = document.createElement("article");
+        card.className = "card";
+
+        const heading = document.createElement("div");
+        heading.className = "card-heading";
+        const name = document.createElement("h2");
+        name.textContent = service.name;
+        const badge = document.createElement("span");
+        badge.className = `badge ${service.status}`;
+        badge.textContent = service.status;
+        heading.append(name, badge);
+
+        const details = document.createElement("div");
+        details.className = "details";
+        const latency = document.createElement("span");
+        latency.className = "muted";
+        latency.textContent = service.latency_ms === null ? "No response time" : `${service.latency_ms} ms`;
+        const checked = document.createElement("time");
+        checked.className = "muted";
+        checked.dateTime = service.checked_at || "";
+        checked.textContent = formatTime(service.checked_at);
+        details.append(latency, checked);
+
+        const error = document.createElement("p");
+        error.className = "error";
+        error.textContent = service.error || "";
+
+        const history = document.createElement("div");
+        history.className = "history";
+        history.setAttribute("aria-label", "Recent check history");
+        for (const check of service.history) {
+          const tick = document.createElement("span");
+          tick.className = `tick ${check.status}`;
+          tick.title = `${check.status} at ${formatTime(check.checked_at)}`;
+          history.append(tick);
+        }
+
+        card.append(heading, details, error, history);
+        return card;
+      }
+
+      async function refresh() {
+        try {
+          const response = await fetch("/api/status", { cache: "no-store" });
+          if (!response.ok) throw new Error(`Status request failed (${response.status})`);
+          const data = await response.json();
+          statusLabel.textContent = data.status;
+          statusDot.className = `dot ${data.status}`;
+          const healthy = data.services.filter((service) => service.status === "healthy").length;
+          summary.textContent = `${healthy} of ${data.services.length} services healthy` +
+            (data.checked_at ? ` · Last check ${formatTime(data.checked_at)}` : "");
+          services.replaceChildren();
+          if (data.services.length === 0) {
+            const empty = document.createElement("p");
+            empty.className = "empty muted";
+            empty.textContent = "No endpoints configured. Add services to your monitoring JSON config to start checking them.";
+            services.append(empty);
+          } else {
+            services.append(...data.services.map(serviceCard));
+          }
+          updated.textContent = ` · Updated ${new Date().toLocaleTimeString()}`;
+        } catch (error) {
+          statusLabel.textContent = "Status unavailable";
+          statusDot.className = "dot unhealthy";
+          summary.textContent = error.message;
+        }
+      }
+
+      refresh();
+      window.setInterval(refresh, 5000);
+    </script>
+  </body>
+</html>
